@@ -26,79 +26,8 @@ The answer?
 
 A tiered hierarchical memory structure that allows users on the same enterprise account to interact with broader memory features and push .md files to rag with appropriate access. The LLM itself looks at the org and team level items to derive insights, and help steer people correctly. You can think of this as an  
 
+<img width="2040" height="1260" alt="memory_hierarchy_3x" src="https://github.com/user-attachments/assets/92546c44-d5a6-4bd2-9ea1-732526313871" />
 
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="2040" height="1260" viewBox="0 0 680 420" role="img" aria-label="Tiered memory hierarchy">
-  <title>Tiered memory hierarchy</title>
-  <desc>Three tiers (org, team, personal) by two primitives (derived from chats, authored .md). Only personal tier has derived memory. Team and org are authored-only. Promotion across tiers is via explicit commit verbs.</desc>
-
-  <style>
-    text { font-family: system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
-    .t  { font-size: 14px; fill: #2C2C2A; }
-    .ts { font-size: 12px; fill: #5F5E5A; }
-    .th { font-size: 14px; font-weight: 500; fill: #2C2C2A; }
-    .c-teal > rect   { fill: #E1F5EE; stroke: #0F6E56; }
-    .c-teal .th      { fill: #085041; }
-    .c-teal .ts      { fill: #0F6E56; }
-    .c-purple > rect { fill: #EEEDFE; stroke: #534AB7; }
-    .c-purple .th    { fill: #3C3489; }
-    .c-purple .ts    { fill: #534AB7; }
-    .c-gray > rect   { fill: #F1EFE8; stroke: #5F5E5A; }
-    .c-gray .ts      { fill: #5F5E5A; }
-  </style>
-
-  <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M2 1L8 5L2 9" fill="none" stroke="#0F6E56" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-  </defs>
-
-  <text class="ts" x="230" y="35" text-anchor="middle">Derived (auto from chats)</text>
-  <text class="ts" x="450" y="35" text-anchor="middle">Authored (committed .md)</text>
-
-  <text class="th" x="50" y="100" dominant-baseline="central">Org</text>
-  <g class="c-gray">
-    <rect x="130" y="60" width="200" height="80" rx="8" stroke-width="0.5" stroke-dasharray="4 3"/>
-    <text class="ts" x="230" y="92" text-anchor="middle" dominant-baseline="central">—</text>
-    <text class="ts" x="230" y="112" text-anchor="middle" dominant-baseline="central">no chats at this tier</text>
-  </g>
-  <g class="c-teal">
-    <rect x="350" y="60" width="200" height="80" rx="8" stroke-width="0.5"/>
-    <text class="th" x="450" y="92" text-anchor="middle" dominant-baseline="central">Authored</text>
-    <text class="ts" x="450" y="114" text-anchor="middle" dominant-baseline="central">policies, charters</text>
-  </g>
-
-  <text class="th" x="50" y="200" dominant-baseline="central">Team</text>
-  <g class="c-gray">
-    <rect x="130" y="160" width="200" height="80" rx="8" stroke-width="0.5" stroke-dasharray="4 3"/>
-    <text class="ts" x="230" y="192" text-anchor="middle" dominant-baseline="central">—</text>
-    <text class="ts" x="230" y="212" text-anchor="middle" dominant-baseline="central">no chats at this tier</text>
-  </g>
-  <g class="c-teal">
-    <rect x="350" y="160" width="200" height="80" rx="8" stroke-width="0.5"/>
-    <text class="th" x="450" y="192" text-anchor="middle" dominant-baseline="central">Authored</text>
-    <text class="ts" x="450" y="214" text-anchor="middle" dominant-baseline="central">runbooks, ADRs</text>
-  </g>
-
-  <text class="th" x="50" y="300" dominant-baseline="central">Personal</text>
-  <g class="c-purple">
-    <rect x="130" y="260" width="200" height="80" rx="8" stroke-width="0.5"/>
-    <text class="th" x="230" y="292" text-anchor="middle" dominant-baseline="central">Derived</text>
-    <text class="ts" x="230" y="314" text-anchor="middle" dominant-baseline="central">auto-summarized chats</text>
-  </g>
-  <g class="c-teal">
-    <rect x="350" y="260" width="200" height="80" rx="8" stroke-width="0.5"/>
-    <text class="th" x="450" y="292" text-anchor="middle" dominant-baseline="central">Authored</text>
-    <text class="ts" x="450" y="314" text-anchor="middle" dominant-baseline="central">private notes, prefs</text>
-  </g>
-
-  <line x1="575" y1="345" x2="575" y2="55" stroke="#0F6E56" stroke-width="1.5" marker-end="url(#arrow)" fill="none"/>
-  <text class="ts" x="585" y="195" dominant-baseline="central">commit</text>
-  <text class="ts" x="585" y="211" dominant-baseline="central">verbs</text>
-
-  <text class="ts" x="40" y="372">Read injection: org/team content flows into personal context per read perms.</text>
-  <text class="ts" x="40" y="392">Derivation is a query-time function over readable tiers, not a stored layer.</text>
-</svg>
 
 
 
