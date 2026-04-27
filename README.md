@@ -26,7 +26,7 @@ The answer?
 
 A tiered hierarchical memory structure that allows users on the same enterprise account to interact with broader memory features and push .md files to rag with appropriate access. The LLM itself looks at the org and team level items to derive insights, and help steer people correctly. You can think of this as an  
 
-<img width="748" height="451" alt="Screenshot 2026-04-27 at 12 15 33 PM" src="https://github.com/user-attachments/assets/0f96b423-45ee-4ec3-af63-c94e5177993d" />
+
 
 
 
