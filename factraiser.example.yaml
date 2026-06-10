@@ -1,0 +1,25 @@
+# Example Factraiser org config. Copy to factraiser.yaml and edit,
+# or generate one with: factraiser init <org-name>
+org: acme
+memory_root: memories
+
+teams:
+  platform:
+    members: [alice, bob]
+    permissions:
+      write_org: true        # platform may publish learnings org-wide
+  hr:
+    members: [carol]
+    permissions:
+      write_team: false      # HR notes stay in personal memory
+
+# Org-wide defaults; team permissions above override them.
+permissions:
+  write_team: true
+  write_org: false
+
+guardrails:
+  # Categories blocked from team/org memory. Personal memory is never filtered.
+  blocked_categories: [pii, secrets, hr, legal]
+  # Org-specific terms to keep out of shared memory.
+  custom_blocklist: []
