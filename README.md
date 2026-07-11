@@ -90,6 +90,8 @@ guardrails:
 
 Each user connects with their own `FACTRAISER_USER`, and the tiers, permissions, and guardrails apply automatically.
 
+**MCP 2 ready:** the server runs on both the MCP SDK 1.x line and 2.x (MCP spec **2026-07-28** — stateless core), auto-negotiating the classic `initialize` handshake and the new `server/discover` flow. Factraiser was stateless per-request from day one (identity from env, all state on disk), so the new protocol core required no architectural change. To opt into the 2.x SDK: `pip install --pre 'mcp>=2.0.0b1'`.
+
 ## CLI
 
 ```text

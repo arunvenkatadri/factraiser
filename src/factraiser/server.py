@@ -26,7 +26,10 @@ from __future__ import annotations
 
 import os
 
-from mcp.server.fastmcp import FastMCP
+try:  # mcp SDK 2.x — MCP spec 2026-07-28: stateless core, server/discover
+    from mcp.server.mcpserver import MCPServer as _ServerClass
+except ImportError:  # mcp SDK 1.x — classic initialize handshake
+    from mcp.server.fastmcp import FastMCP as _ServerClass
 
 from .config import OrgConfig, load_config
 from .guardrails import check_for_scope
@@ -35,7 +38,7 @@ from .search import search as run_search
 from .store import Memory, MemoryStore
 from .traces import VALID_RESULTS, TraceLog
 
-mcp = FastMCP(
+mcp = _ServerClass(
     "factraiser",
     instructions=(
         "Factraiser is the organization's shared memory. Use `recall` before "
