@@ -33,6 +33,7 @@ from .guardrails import check_for_scope
 from .permissions import can_write
 from .search import search as run_search
 from .store import Memory, MemoryStore
+from .traces import VALID_RESULTS, TraceLog
 
 mcp = FastMCP(
     "factraiser",
@@ -43,7 +44,11 @@ mcp = FastMCP(
         "tier. Prefer the narrowest scope that fits: personal for individual "
         "context, team for team practices, org for org-wide knowledge. Writes "
         "to team/org memory are guardrail-scanned; if a write is blocked, "
-        "redact the flagged content and retry, or fall back to personal scope."
+        "redact the flagged content and retry, or fall back to personal scope. "
+        "When a task that used recalled memory concludes, call `record_outcome` "
+        "with the trace id from the recall — without asking the user — so the "
+        "org learns which memories actually help. Use result 'misleading' when "
+        "a memory was wrong or harmful, distinct from the task merely failing."
     ),
 )
 
@@ -103,13 +108,18 @@ def remember(
 def recall(query: str, limit: int = 8) -> str:
     """Search all memory you can read (your personal, your teams', and org).
 
-    Call this before starting a task to pull relevant prior learnings.
+    Call this before starting a task to pull relevant prior learnings. When
+    the task concludes, report how it went via `record_outcome` using the
+    trace id in the first line of the result.
     """
     config, store, user = _context()
     hits = run_search(query, store.iter_accessible(user, config.teams_of(user)), limit=limit)
     if not hits:
         return "No matching memories."
-    return "\n\n".join(_render(h.memory) for h in hits)
+    trace_id = TraceLog(config.memory_root).log_recall(
+        user, query, [h.memory.id for h in hits]
+    )
+    return f"trace: {trace_id}\n\n" + "\n\n".join(_render(h.memory) for h in hits)
 
 
 @mcp.tool()
@@ -185,8 +195,35 @@ def shared_context() -> str:
     ]
     if not shared:
         return "No shared memory yet — the org/team tiers are empty."
-    header = f"Shared memory for org {config.org!r} ({len(shared)} entries):"
+    trace_id = TraceLog(config.memory_root).log_recall(
+        user, "(shared_context)", [m.id for m in shared]
+    )
+    header = f"trace: {trace_id}\nShared memory for org {config.org!r} ({len(shared)} entries):"
     return header + "\n\n" + "\n\n".join(_render(m) for m in shared)
+
+
+@mcp.tool()
+def record_outcome(trace_id: str, result: str, note: str = "") -> str:
+    """Record how a task that used recalled memory concluded.
+
+    Call this when such a task wraps up — no need to ask the user first.
+    `result` is one of: success, partial, failure, or misleading (the recalled
+    memory was wrong or harmful — distinct from the task merely failing).
+    Add a short `note` when a memory was outdated or misleading, so it can be
+    fixed. This signal drives ranking, pruning, and promotion of memories.
+    """
+    config, store, user = _context()
+    log = TraceLog(config.memory_root)
+    if result not in VALID_RESULTS:
+        return f"Invalid result {result!r}; expected one of: {', '.join(VALID_RESULTS)}."
+    try:
+        event = log.log_outcome(user, trace_id, result, note)
+    except KeyError:
+        return (
+            f"Unknown trace id {trace_id!r} — use the `trace:` id returned by "
+            "recall or shared_context."
+        )
+    return f"Recorded {result} for {len(event['memory_ids'])} memories on {trace_id}."
 
 
 def run() -> None:

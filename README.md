@@ -38,6 +38,8 @@ Connected through MCP, Claude can:
 - **`remember`** — commit a durable learning to the narrowest tier that fits, subject to permissions and guardrails.
 - **`promote_memory`** — move a learning up the hierarchy (personal → team → org), re-checked at each step.
 
+**The outcome loop:** every `recall` is traced, and when a task concludes the LLM calls **`record_outcome`** (`success` / `partial` / `failure` / `misleading`) so the org learns which memories actually help. Memories stay immutable — signal lives in an append-only, per-user trace log under `memories/traces/`, and usefulness is derived at query time. See `docs/design/outcome-loop.md` for the full design (ranking, pruning, private evals, and org-owned trace export follow in later phases).
+
 **Guardrails:** by default, PII, secrets, HR, and legal content are blocked from anything that isn't personal memory. When a write is blocked, the findings are returned so the LLM can redact and retry. These checks are pattern-based and imperfect — give the AI context and treat them as a safety net, not the only line of defense.
 
 ## Quickstart
@@ -97,6 +99,7 @@ factraiser add-user <u> --team   add a user to a team
 factraiser status                org, teams, memory counts
 factraiser search <q> --user u   search memory as a user
 factraiser scan <file|->         guardrail-scan content before sharing
+factraiser stats                 per-memory usage and outcome aggregates
 factraiser insights              Claude-generated readout of shared memory
 factraiser serve                 run the MCP server (stdio)
 ```
@@ -112,6 +115,8 @@ pytest
 
 ## Roadmap
 
+- Outcome loop phases 2–3: usefulness-weighted ranking, compost/promotion reports, private evals, trace export (`docs/design/outcome-loop.md`)
+- Auto-summarized chat capture into personal memory
 - Embedding-based retrieval (the `recall` MCP surface stays the same)
 - Git-native sync: push/pull the memory repo, promotion via pull request
 - LLM-assisted guardrails (Claude classifies borderline content before it lands in shared tiers)

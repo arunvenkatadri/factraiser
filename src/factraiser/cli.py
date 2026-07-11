@@ -11,6 +11,7 @@ from .config import ConfigError, Guardrails, OrgConfig, Team, load_config, save_
 from .guardrails import scan
 from .search import search as run_search
 from .store import MemoryStore
+from .traces import TraceLog
 
 DEFAULT_CONFIG = "factraiser.yaml"
 
@@ -104,6 +105,31 @@ def cmd_scan(args) -> int:
     return 0
 
 
+def cmd_stats(args) -> int:
+    """Per-memory usage aggregates, filtered to memories the user can read."""
+    config = load_config(_config_path(args))
+    store = MemoryStore(config.memory_root)
+    user = args.user or os.environ.get("FACTRAISER_USER")
+    if not user:
+        print("pass --user or set FACTRAISER_USER", file=sys.stderr)
+        return 1
+    stats = TraceLog(config.memory_root).aggregate(config.users() or [user])
+    readable = {m.id: m for m in store.iter_accessible(user, config.teams_of(user))}
+    rows = [(mid, s) for mid, s in stats.items() if mid in readable]
+    if not rows:
+        print("no usage recorded yet for memories you can read")
+        return 0
+    rows.sort(key=lambda r: r[1].recalls, reverse=True)
+    print(f"{'recalls':>7} {'succ':>4} {'part':>4} {'fail':>4} {'misl':>4}  {'last used':<20} memory")
+    for mid, s in rows:
+        o = s.outcomes
+        print(
+            f"{s.recalls:>7} {o['success']:>4} {o['partial']:>4} {o['failure']:>4} "
+            f"{o['misleading']:>4}  {s.last_used:<20} [{mid}] {readable[mid].title}"
+        )
+    return 0
+
+
 def cmd_insights(args) -> int:
     from .insights import generate_insights
 
@@ -156,6 +182,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("scan", help="guardrail-scan a file (or - for stdin)")
     p.add_argument("file")
     p.set_defaults(func=cmd_scan)
+
+    p = sub.add_parser("stats", help="per-memory usage and outcome aggregates")
+    p.add_argument("--user")
+    p.set_defaults(func=cmd_stats)
 
     p = sub.add_parser("insights", help="Claude-generated readout of shared memory (needs ANTHROPIC_API_KEY)")
     p.set_defaults(func=cmd_insights)

@@ -50,3 +50,22 @@ def test_promote_personal_to_team(env):
     memory_id = saved.split()[1]
     result = server.promote_memory(memory_id, "team", team="platform")
     assert result.startswith("Promoted")
+
+
+def test_recall_returns_trace_and_outcome_closes_loop(env):
+    server.remember(title="Failover runbook", content="Promote replica first.",
+                    scope="team", team="platform")
+    recalled = server.recall("failover")
+    trace_id = recalled.splitlines()[0].removeprefix("trace: ")
+    assert trace_id.startswith("tr-")
+
+    assert server.record_outcome(trace_id, "success", "worked").startswith("Recorded success")
+    assert "expected one of" in server.record_outcome(trace_id, "great")
+    assert server.record_outcome("tr-bogus", "failure").startswith("Unknown trace id")
+
+
+def test_shared_context_logs_trace(env):
+    server.remember(title="Org rule", content="Use SSO everywhere.", scope="team",
+                    team="platform")
+    assert server.shared_context().startswith("trace: tr-")
+
