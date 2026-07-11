@@ -26,7 +26,18 @@ class Hit:
     score: float
 
 
-def search(query: str, memories: Iterable[Memory], limit: int = 10) -> list[Hit]:
+def search(
+    query: str,
+    memories: Iterable[Memory],
+    limit: int = 10,
+    usefulness: dict[str, float] | None = None,
+) -> list[Hit]:
+    """Rank memories by keyword relevance, scaled by outcome-derived usefulness.
+
+    `usefulness` maps memory id -> multiplier (from MemoryStats.multiplier()).
+    Relevance is primary; a memory with no keyword match never surfaces just
+    because it was useful elsewhere.
+    """
     query_tokens = set(_tokens(query))
     if not query_tokens:
         return []
@@ -47,6 +58,8 @@ def search(query: str, memories: Iterable[Memory], limit: int = 10) -> list[Hit]
             if token in body_set:
                 score += 1.0 + 0.1 * min(body_tokens.count(token), 5)
         if score > 0:
+            if usefulness:
+                score *= usefulness.get(memory.id, 1.0)
             hits.append(Hit(memory=memory, score=score))
 
     hits.sort(key=lambda h: h.score, reverse=True)

@@ -17,8 +17,8 @@ readable, diffable, and reviewable in pull requests.
 
 from __future__ import annotations
 
-import hashlib
 import re
+import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -112,7 +112,7 @@ class MemoryStore:
         tags: list[str] | None = None,
     ) -> Memory:
         created = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        digest = hashlib.sha256(f"{created}{author}{title}{content}".encode()).hexdigest()[:6]
+        digest = secrets.token_hex(3)  # random: identical saves must not collide
         memory = Memory(
             id=f"{created[:10].replace('-', '')}-{_slugify(title)}-{digest}",
             title=title,

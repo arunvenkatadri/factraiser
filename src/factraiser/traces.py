@@ -21,6 +21,7 @@ who can read the memory itself; that filtering happens in the caller.
 from __future__ import annotations
 
 import json
+import math
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -28,12 +29,31 @@ from pathlib import Path
 
 VALID_RESULTS = ("success", "partial", "failure", "misleading")
 
+# Contribution of each outcome to a memory's usefulness signal. `misleading`
+# is punished hardest — a wrong memory is worse than no memory.
+_OUTCOME_WEIGHTS = {"success": 1.0, "partial": 0.5, "failure": -0.5, "misleading": -2.0}
+# Outcome contributions halve every 180 days, so stale wins don't coast.
+_HALF_LIFE_DAYS = 180.0
+
 
 @dataclass
 class MemoryStats:
     recalls: int = 0
     outcomes: dict[str, int] = field(default_factory=lambda: {r: 0 for r in VALID_RESULTS})
     last_used: str = ""
+    decayed_net: float = 0.0  # time-decayed sum of outcome weights
+    success_users: set[str] = field(default_factory=set)
+    misleading_notes: list[str] = field(default_factory=list)
+
+    def multiplier(self) -> float:
+        """Usefulness multiplier for search ranking, bounded [0.4, 1.3].
+
+        Relevance stays the primary signal; this is a tiebreaker-plus.
+        Memories with no outcome history get exactly 1.0.
+        """
+        if self.decayed_net == 0.0:
+            return 1.0
+        return max(0.4, 1.0 + 0.3 * math.tanh(self.decayed_net / 3.0))
 
 
 class TraceLog:
@@ -103,11 +123,15 @@ class TraceLog:
                 return event
         return None
 
-    def aggregate(self, users: list[str]) -> dict[str, MemoryStats]:
+    def aggregate(self, users: list[str], now: datetime | None = None) -> dict[str, MemoryStats]:
         """Per-memory aggregates across the given users' traces.
 
-        Counts only — safe to show to anyone who can read the memory itself.
+        Counts, a time-decayed usefulness score, which users had successes
+        (drives promotion candidates), and notes attached to `misleading`
+        outcomes (drives the compost report). No task content beyond those
+        notes — safe to show to anyone who can read the memory itself.
         """
+        now = now or datetime.now(timezone.utc)
         stats: dict[str, MemoryStats] = {}
         for user in users:
             for event in self.iter_events(user):
@@ -116,7 +140,19 @@ class TraceLog:
                     if event["event"] == "recall":
                         entry.recalls += 1
                     elif event["event"] == "outcome" and event["result"] in entry.outcomes:
-                        entry.outcomes[event["result"]] += 1
+                        result = event["result"]
+                        entry.outcomes[result] += 1
+                        age_days = max(
+                            0.0,
+                            (now - datetime.fromisoformat(event["ts"])).total_seconds() / 86400,
+                        )
+                        decay = 0.5 ** (age_days / _HALF_LIFE_DAYS)
+                        entry.decayed_net += _OUTCOME_WEIGHTS[result] * decay
+                        if result == "success":
+                            entry.success_users.add(event["user"])
+                        elif result == "misleading" and event.get("note"):
+                            if len(entry.misleading_notes) < 3:
+                                entry.misleading_notes.append(event["note"])
                     if event["ts"] > entry.last_used:
                         entry.last_used = event["ts"]
         return stats

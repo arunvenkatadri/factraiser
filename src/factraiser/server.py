@@ -116,12 +116,17 @@ def recall(query: str, limit: int = 8) -> str:
     trace id in the first line of the result.
     """
     config, store, user = _context()
-    hits = run_search(query, store.iter_accessible(user, config.teams_of(user)), limit=limit)
+    log = TraceLog(config.memory_root)
+    stats = log.aggregate(config.users() or [user])
+    hits = run_search(
+        query,
+        store.iter_accessible(user, config.teams_of(user)),
+        limit=limit,
+        usefulness={mid: s.multiplier() for mid, s in stats.items()},
+    )
     if not hits:
         return "No matching memories."
-    trace_id = TraceLog(config.memory_root).log_recall(
-        user, query, [h.memory.id for h in hits]
-    )
+    trace_id = log.log_recall(user, query, [h.memory.id for h in hits])
     return f"trace: {trace_id}\n\n" + "\n\n".join(_render(h.memory) for h in hits)
 
 

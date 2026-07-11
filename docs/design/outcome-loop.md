@@ -1,6 +1,10 @@
 # Design: The Outcome Loop
 
-**Status:** proposal — no code yet. React to this before implementation.
+**Status:** Phases 1–2 implemented (trace log, `record_outcome`, `stats`,
+usefulness-weighted ranking, `review`). Phase 3 (evals, export) not started.
+Resolved open questions: `misleading` added as a fourth result; the model
+auto-records without confirming; outcomes are kept forever, bare recall
+events prunable after 12 months (pruning tool not yet built).
 
 ## Why
 

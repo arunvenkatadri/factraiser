@@ -130,6 +130,20 @@ def cmd_stats(args) -> int:
     return 0
 
 
+def cmd_review(args) -> int:
+    """Compost report + promotion candidates, derived from usage traces."""
+    from .review import build_report, render_report
+
+    config = load_config(_config_path(args))
+    user = args.user or os.environ.get("FACTRAISER_USER")
+    if not user:
+        print("pass --user or set FACTRAISER_USER", file=sys.stderr)
+        return 1
+    report = build_report(config, MemoryStore(config.memory_root), user, stale_days=args.days)
+    print(render_report(report, args.days))
+    return 0
+
+
 def cmd_insights(args) -> int:
     from .insights import generate_insights
 
@@ -186,6 +200,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("stats", help="per-memory usage and outcome aggregates")
     p.add_argument("--user")
     p.set_defaults(func=cmd_stats)
+
+    p = sub.add_parser("review", help="compost report + promotion candidates from usage traces")
+    p.add_argument("--user")
+    p.add_argument("--days", type=int, default=90, help="staleness threshold in days (default 90)")
+    p.set_defaults(func=cmd_review)
 
     p = sub.add_parser("insights", help="Claude-generated readout of shared memory (needs ANTHROPIC_API_KEY)")
     p.set_defaults(func=cmd_insights)
