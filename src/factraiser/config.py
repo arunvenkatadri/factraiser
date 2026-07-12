@@ -84,8 +84,11 @@ def load_config(path: str | Path) -> OrgConfig:
         raise ConfigError(
             f"No config found at {path}. Run `factraiser init <org-name>` first."
         )
-    raw = yaml.safe_load(path.read_text()) or {}
-    if "org" not in raw:
+    try:
+        raw = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"{path}: not valid YAML ({exc})") from exc
+    if not isinstance(raw, dict) or "org" not in raw:
         raise ConfigError(f"{path}: missing required key 'org'")
 
     perms = raw.get("permissions") or {}

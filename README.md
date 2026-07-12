@@ -109,6 +109,16 @@ factraiser serve                 run the MCP server (stdio)
 
 `factraiser insights` uses the Anthropic API (`pip install -e '.[insights]'` and set `ANTHROPIC_API_KEY`) to read all shared memory and report cross-team themes, contradictions, candidates for promotion to org memory, and knowledge gaps.
 
+## Security model
+
+Be clear-eyed about what enforces what:
+
+- **Identity is declarative.** `FACTRAISER_USER` is set by the connecting client, so tiers and permissions protect against *accidental* oversharing, not a malicious insider. For hard multi-user enforcement, give each tier its own repository (or filesystem ACLs) so the git/host layer enforces who can read `users/<name>/` — the plain-files design exists precisely so you can do that.
+- **Guardrails are a safety net, not a boundary.** They're pattern-based and imperfect by design; give the AI context and treat blocked writes as a prompt to redact, with human review (e.g. promotion via PR) as the final gate.
+- **Shared memory is untrusted LLM input.** Anything committed to team/org tiers gets injected into other users' Claude sessions — treat writes to shared tiers like commits to shared code, because that's what they are.
+- **All names are path-validated.** Users, teams, and memory ids must be single safe path components; hostile values can't escape the memory root. LLM-supplied inputs are size-capped, and corrupted trace lines are skipped rather than crashing recall.
+- **Traces are personal-tier.** Raw trace files live under `memories/traces/users/<user>/`; only count-level aggregates surface to others.
+
 ## Development
 
 ```bash

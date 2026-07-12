@@ -27,7 +27,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .naming import check_name
+
 VALID_RESULTS = ("success", "partial", "failure", "misleading")
+
+MAX_NOTE_LEN = 4_000
 
 # Contribution of each outcome to a memory's usefulness signal. `misleading`
 # is punished hardest — a wrong memory is worse than no memory.
@@ -61,7 +65,7 @@ class TraceLog:
         self.root = Path(memory_root) / "traces" / "users"
 
     def _file(self, user: str, ts: str) -> Path:
-        directory = self.root / user
+        directory = self.root / check_name(user, "user name")
         directory.mkdir(parents=True, exist_ok=True)
         return directory / f"{ts[:7]}.jsonl"
 
@@ -94,6 +98,7 @@ class TraceLog:
     ) -> dict:
         if result not in VALID_RESULTS:
             raise ValueError(f"result must be one of {VALID_RESULTS}, got {result!r}")
+        note = note[:MAX_NOTE_LEN]
         if memory_ids is None:
             recall = self.find_recall(user, trace_id)
             if recall is None:
@@ -109,13 +114,19 @@ class TraceLog:
     # -- read ---------------------------------------------------------------
 
     def iter_events(self, user: str):
-        directory = self.root / user
+        directory = self.root / check_name(user, "user name")
         if not directory.is_dir():
             return
         for path in sorted(directory.glob("*.jsonl")):
             for line in path.read_text().splitlines():
-                if line.strip():
-                    yield json.loads(line)
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # one corrupted line must not take down recall/stats
+                if isinstance(event, dict) and "event" in event and "ts" in event:
+                    yield event
 
     def find_recall(self, user: str, trace_id: str) -> dict | None:
         for event in self.iter_events(user):
@@ -135,24 +146,28 @@ class TraceLog:
         stats: dict[str, MemoryStats] = {}
         for user in users:
             for event in self.iter_events(user):
-                for memory_id in event.get("memory_ids", []):
+                memory_ids = event.get("memory_ids")
+                if not isinstance(memory_ids, list):
+                    continue
+                for memory_id in memory_ids:
                     entry = stats.setdefault(memory_id, MemoryStats())
                     if event["event"] == "recall":
                         entry.recalls += 1
-                    elif event["event"] == "outcome" and event["result"] in entry.outcomes:
+                    elif event["event"] == "outcome" and event.get("result") in entry.outcomes:
                         result = event["result"]
                         entry.outcomes[result] += 1
-                        age_days = max(
-                            0.0,
-                            (now - datetime.fromisoformat(event["ts"])).total_seconds() / 86400,
-                        )
+                        try:
+                            age_seconds = (now - datetime.fromisoformat(event["ts"])).total_seconds()
+                            age_days = max(0.0, age_seconds / 86400)
+                        except (ValueError, TypeError):
+                            age_days = 0.0  # unparseable timestamp: count it, skip decay
                         decay = 0.5 ** (age_days / _HALF_LIFE_DAYS)
                         entry.decayed_net += _OUTCOME_WEIGHTS[result] * decay
                         if result == "success":
-                            entry.success_users.add(event["user"])
+                            entry.success_users.add(event.get("user", user))
                         elif result == "misleading" and event.get("note"):
                             if len(entry.misleading_notes) < 3:
-                                entry.misleading_notes.append(event["note"])
+                                entry.misleading_notes.append(str(event["note"])[:200])
                     if event["ts"] > entry.last_used:
                         entry.last_used = event["ts"]
         return stats

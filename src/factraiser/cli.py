@@ -9,9 +9,16 @@ from pathlib import Path
 
 from .config import ConfigError, Guardrails, OrgConfig, Team, load_config, save_config
 from .guardrails import scan
+from .naming import check_name
 from .search import search as run_search
 from .store import MemoryStore
 from .traces import TraceLog
+
+
+def _bool_flag(value: str) -> bool:
+    if value.lower() in ("true", "false"):
+        return value.lower() == "true"
+    raise argparse.ArgumentTypeError(f"expected 'true' or 'false', got {value!r}")
 
 DEFAULT_CONFIG = "factraiser.yaml"
 
@@ -36,6 +43,11 @@ def cmd_init(args) -> int:
 def cmd_add_team(args) -> int:
     path = _config_path(args)
     config = load_config(path)
+    try:
+        check_name(args.name, "team name")
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     if args.name in config.teams:
         print(f"team {args.name!r} already exists", file=sys.stderr)
         return 1
@@ -50,6 +62,11 @@ def cmd_add_team(args) -> int:
 def cmd_add_user(args) -> int:
     path = _config_path(args)
     config = load_config(path)
+    try:
+        check_name(args.user, "user name")
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     if args.team not in config.teams:
         print(f"unknown team {args.team!r} — run add-team first", file=sys.stderr)
         return 1
@@ -94,7 +111,11 @@ def cmd_search(args) -> int:
 
 def cmd_scan(args) -> int:
     config = load_config(_config_path(args))
-    text = Path(args.file).read_text() if args.file != "-" else sys.stdin.read()
+    try:
+        text = Path(args.file).read_text() if args.file != "-" else sys.stdin.read()
+    except OSError as exc:
+        print(f"cannot read {args.file}: {exc}", file=sys.stderr)
+        return 1
     findings = scan(text, config.guardrails)
     for finding in findings:
         print(f"[{finding.category}] {finding.label}: …{finding.excerpt}…")
@@ -113,7 +134,7 @@ def cmd_stats(args) -> int:
     if not user:
         print("pass --user or set FACTRAISER_USER", file=sys.stderr)
         return 1
-    stats = TraceLog(config.memory_root).aggregate(config.users() or [user])
+    stats = TraceLog(config.memory_root).aggregate(sorted(set(config.users()) | {user}))
     readable = {m.id: m for m in store.iter_accessible(user, config.teams_of(user))}
     rows = [(mid, s) for mid, s in stats.items() if mid in readable]
     if not rows:
@@ -174,9 +195,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("add-team", help="add a team")
     p.add_argument("name")
-    p.add_argument("--write-team", type=lambda v: v.lower() == "true", default=None,
+    p.add_argument("--write-team", type=_bool_flag, default=None,
                    help="override org default for writing to team memory (true/false)")
-    p.add_argument("--write-org", type=lambda v: v.lower() == "true", default=None,
+    p.add_argument("--write-org", type=_bool_flag, default=None,
                    help="override org default for writing to org memory (true/false)")
     p.set_defaults(func=cmd_add_team)
 

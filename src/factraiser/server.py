@@ -33,10 +33,17 @@ except ImportError:  # mcp SDK 1.x — classic initialize handshake
 
 from .config import OrgConfig, load_config
 from .guardrails import check_for_scope
+from .naming import check_name
 from .permissions import can_write
 from .search import search as run_search
 from .store import Memory, MemoryStore
 from .traces import VALID_RESULTS, TraceLog
+
+# Caps on LLM-supplied input, to bound disk writes and trace growth.
+MAX_TITLE_LEN = 300
+MAX_CONTENT_LEN = 100_000
+MAX_TAGS = 20
+MAX_RECALL_LIMIT = 50
 
 mcp = _ServerClass(
     "factraiser",
@@ -60,8 +67,21 @@ def _context() -> tuple[OrgConfig, MemoryStore, str]:
     user = os.environ.get("FACTRAISER_USER")
     if not user:
         raise RuntimeError("FACTRAISER_USER is not set; the server needs to know who you are")
+    try:
+        check_name(user, "FACTRAISER_USER")
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
     config = load_config(os.environ.get("FACTRAISER_CONFIG", "factraiser.yaml"))
     return config, MemoryStore(config.memory_root), user
+
+
+def _trace_users(config: OrgConfig, user: str) -> list[str]:
+    """Everyone whose traces feed aggregates: team members plus the caller.
+
+    The union matters — a user outside every team still generates signal,
+    and dropping it would silently exclude their outcomes from ranking.
+    """
+    return sorted(set(config.users()) | {user})
 
 
 def _render(memory: Memory, *, with_body: bool = True) -> str:
@@ -87,6 +107,18 @@ def remember(
     the response lists the findings so you can redact and retry.
     """
     config, store, user = _context()
+
+    title, content = title.strip(), content.strip()
+    if not title or not content:
+        return "INVALID: title and content must be non-empty."
+    if len(title) > MAX_TITLE_LEN:
+        return f"INVALID: title exceeds {MAX_TITLE_LEN} characters."
+    if len(content) > MAX_CONTENT_LEN:
+        return (
+            f"INVALID: content exceeds {MAX_CONTENT_LEN} characters — split it "
+            "into multiple focused memories."
+        )
+    tags = [str(t)[:100] for t in (tags or [])][:MAX_TAGS]
 
     decision = can_write(config, user, scope, team)
     if not decision.allowed:
@@ -116,8 +148,9 @@ def recall(query: str, limit: int = 8) -> str:
     trace id in the first line of the result.
     """
     config, store, user = _context()
+    limit = max(1, min(limit, MAX_RECALL_LIMIT))
     log = TraceLog(config.memory_root)
-    stats = log.aggregate(config.users() or [user])
+    stats = log.aggregate(_trace_users(config, user))
     hits = run_search(
         query,
         store.iter_accessible(user, config.teams_of(user)),

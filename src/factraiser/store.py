@@ -26,6 +26,7 @@ from pathlib import Path
 import yaml
 
 from .config import VALID_SCOPES
+from .naming import check_name
 
 
 class StoreError(Exception):
@@ -87,16 +88,19 @@ class MemoryStore:
     # -- paths ------------------------------------------------------------
 
     def scope_dir(self, scope: str, *, team: str | None = None, user: str | None = None) -> Path:
-        if scope == "org":
-            return self.root / "org"
-        if scope == "team":
-            if not team:
-                raise StoreError("team scope requires a team name")
-            return self.root / "teams" / team
-        if scope == "personal":
-            if not user:
-                raise StoreError("personal scope requires a user name")
-            return self.root / "users" / user
+        try:
+            if scope == "org":
+                return self.root / "org"
+            if scope == "team":
+                if not team:
+                    raise StoreError("team scope requires a team name")
+                return self.root / "teams" / check_name(team, "team name")
+            if scope == "personal":
+                if not user:
+                    raise StoreError("personal scope requires a user name")
+                return self.root / "users" / check_name(user, "user name")
+        except ValueError as exc:
+            raise StoreError(str(exc)) from exc
         raise StoreError(f"unknown scope {scope!r}; expected one of {VALID_SCOPES}")
 
     # -- write ------------------------------------------------------------
@@ -134,8 +138,14 @@ class MemoryStore:
             path.unlink()
 
     def _path_of(self, memory: Memory) -> Path:
+        # memory.id may come from hand-edited frontmatter — validate before
+        # using it as a filename so a hostile id can't escape the scope dir.
+        try:
+            memory_id = check_name(memory.id, "memory id")
+        except ValueError as exc:
+            raise StoreError(str(exc)) from exc
         directory = self.scope_dir(memory.scope, team=memory.team, user=memory.author)
-        return directory / f"{memory.id}.md"
+        return directory / f"{memory_id}.md"
 
     # -- read -------------------------------------------------------------
 

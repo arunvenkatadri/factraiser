@@ -35,7 +35,7 @@ def build_report(
 ) -> ReviewReport:
     now = now or datetime.now(timezone.utc)
     log = TraceLog(config.memory_root)
-    stats = log.aggregate(config.users() or [user], now=now)
+    stats = log.aggregate(sorted(set(config.users()) | {user}), now=now)
     cutoff = (now - timedelta(days=stale_days)).isoformat(timespec="seconds")
 
     report = ReviewReport()
