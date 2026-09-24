@@ -102,6 +102,8 @@ def scan(text: str, guardrails: Guardrails) -> list[Finding]:
                 findings.append(Finding("legal", f"legal term {keyword!r}", _excerpt(text, idx, idx + len(keyword))))
 
     for term in guardrails.custom_blocklist:
+        if not term.strip():
+            continue  # an empty term would match everything
         idx = lowered.find(term.lower())
         if idx != -1:
             findings.append(Finding("custom", f"blocklisted term {term!r}", _excerpt(text, idx, idx + len(term))))

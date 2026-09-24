@@ -84,6 +84,18 @@ def _trace_users(config: OrgConfig, user: str) -> list[str]:
     return sorted(set(config.users()) | {user})
 
 
+_SCOPE_RANK = {"personal": 0, "team": 1, "org": 2}
+
+
+def _shared_text(title: str, content: str, tags: list[str]) -> str:
+    """Everything that becomes visible in a shared tier — all of it gets scanned."""
+    return "\n".join([title, content, *tags])
+
+
+def _blocked(findings) -> str:
+    return "\n".join(f"- [{f.category}] {f.label}: …{f.excerpt}…" for f in findings)
+
+
 def _render(memory: Memory, *, with_body: bool = True) -> str:
     where = memory.scope if memory.scope != "team" else f"team:{memory.team}"
     head = f"[{memory.id}] ({where}) {memory.title} — by {memory.author}, {memory.created}"
@@ -124,12 +136,11 @@ def remember(
     if not decision.allowed:
         return f"DENIED: {decision.reason}"
 
-    findings = check_for_scope(f"{title}\n{content}", scope, config.guardrails)
+    findings = check_for_scope(_shared_text(title, content, tags), scope, config.guardrails)
     if findings:
-        lines = [f"- [{f.category}] {f.label}: …{f.excerpt}…" for f in findings]
         return (
             f"BLOCKED by guardrails — this content may not be written to {scope} memory:\n"
-            + "\n".join(lines)
+            + _blocked(findings)
             + "\nRedact the flagged content and retry, or save to personal scope instead."
         )
 
@@ -192,23 +203,28 @@ def promote_memory(memory_id: str, to_scope: str, team: str | None = None) -> st
     """Promote a memory up the hierarchy (personal → team → org).
 
     Re-runs permission and guardrail checks for the destination tier. The
-    original memory is kept; promotion creates a copy in the wider tier.
+    original memory is kept; promotion creates a copy in the wider tier that
+    records where it came from and who wrote it.
     """
     config, store, user = _context()
     memory = store.get(memory_id, user, config.teams_of(user))
     if memory is None:
         return f"No accessible memory with id {memory_id!r}."
+    if to_scope in _SCOPE_RANK and _SCOPE_RANK[to_scope] <= _SCOPE_RANK[memory.scope]:
+        return (
+            f"INVALID: promotion must widen scope; {memory_id!r} is already "
+            f"{memory.scope} memory (personal → team → org)."
+        )
 
     decision = can_write(config, user, to_scope, team)
     if not decision.allowed:
         return f"DENIED: {decision.reason}"
 
-    findings = check_for_scope(f"{memory.title}\n{memory.content}", to_scope, config.guardrails)
+    findings = check_for_scope(
+        _shared_text(memory.title, memory.content, memory.tags), to_scope, config.guardrails
+    )
     if findings:
-        lines = [f"- [{f.category}] {f.label}: …{f.excerpt}…" for f in findings]
-        return (
-            f"BLOCKED by guardrails — cannot promote to {to_scope} memory:\n" + "\n".join(lines)
-        )
+        return f"BLOCKED by guardrails — cannot promote to {to_scope} memory:\n" + _blocked(findings)
 
     promoted = store.save(
         title=memory.title,
@@ -217,6 +233,7 @@ def promote_memory(memory_id: str, to_scope: str, team: str | None = None) -> st
         scope=to_scope,
         team=team,
         tags=memory.tags,
+        promoted_from=memory,
     )
     return f"Promoted {memory_id} → {promoted.id} ({to_scope})."
 
@@ -251,12 +268,21 @@ def record_outcome(trace_id: str, result: str, note: str = "") -> str:
     `result` is one of: success, partial, failure, or misleading (the recalled
     memory was wrong or harmful — distinct from the task merely failing).
     Add a short `note` when a memory was outdated or misleading, so it can be
-    fixed. This signal drives ranking, pruning, and promotion of memories.
+    fixed — notes are shown to everyone who can read the memory, so they are
+    guardrail-scanned like shared memory. Recording again on the same trace
+    replaces the earlier verdict. This signal drives ranking, pruning, and
+    promotion of memories.
     """
     config, store, user = _context()
     log = TraceLog(config.memory_root)
     if result not in VALID_RESULTS:
         return f"Invalid result {result!r}; expected one of: {', '.join(VALID_RESULTS)}."
+    findings = check_for_scope(note, "team", config.guardrails)
+    if findings:
+        return (
+            "BLOCKED by guardrails — outcome notes are visible to other readers of "
+            "the memory:\n" + _blocked(findings) + "\nRedact the note and retry."
+        )
     try:
         event = log.log_outcome(user, trace_id, result, note)
     except KeyError:

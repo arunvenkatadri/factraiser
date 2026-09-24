@@ -31,12 +31,42 @@ from pathlib import Path
 
 import yaml
 
+from .naming import check_name
+
 VALID_SCOPES = ("personal", "team", "org")
 DEFAULT_BLOCKED_CATEGORIES = ["pii", "secrets", "hr", "legal"]
 
 
 class ConfigError(Exception):
     pass
+
+
+def _mapping(value, where: str) -> dict:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ConfigError(f"{where} must be a mapping, got {type(value).__name__}")
+    return value
+
+
+def _optional_bool(value, where: str) -> bool | None:
+    # Strict on purpose: bool("false") is True, and this is a permissions file.
+    if value is None or isinstance(value, bool):
+        return value
+    raise ConfigError(f"{where} must be true or false (unquoted), got {value!r}")
+
+
+def _string_list(value, where: str) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise ConfigError(f"{where} must be a list of strings")
+    return list(value)
+
+
+def _name(value, what: str) -> str:
+    try:
+        return check_name(value, what)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
 
 
 @dataclass
@@ -91,36 +121,56 @@ def load_config(path: str | Path) -> OrgConfig:
     if not isinstance(raw, dict) or "org" not in raw:
         raise ConfigError(f"{path}: missing required key 'org'")
 
-    perms = raw.get("permissions") or {}
+    try:
+        return _parse(raw, path)
+    except ConfigError as exc:
+        raise ConfigError(f"{path}: {exc}") from exc
+
+
+def _parse(raw: dict, path: Path) -> OrgConfig:
+    perms = _mapping(raw.get("permissions"), "permissions")
     teams: dict[str, Team] = {}
-    for name, spec in (raw.get("teams") or {}).items():
-        spec = spec or {}
-        tperms = spec.get("permissions") or {}
+    for name, spec in _mapping(raw.get("teams"), "teams").items():
+        name = _name(name, "team name")
+        spec = _mapping(spec, f"teams.{name}")
+        tperms = _mapping(spec.get("permissions"), f"teams.{name}.permissions")
+        members = _string_list(spec.get("members") or [], f"teams.{name}.members")
         teams[name] = Team(
             name=name,
-            members=list(spec.get("members") or []),
-            write_team=tperms.get("write_team"),
-            write_org=tperms.get("write_org"),
+            members=[_name(m, "user name") for m in members],
+            write_team=_optional_bool(tperms.get("write_team"), f"teams.{name}.permissions.write_team"),
+            write_org=_optional_bool(tperms.get("write_org"), f"teams.{name}.permissions.write_org"),
         )
 
-    graw = raw.get("guardrails") or {}
-    guardrails = Guardrails(
-        blocked_categories=list(
-            graw.get("blocked_categories", DEFAULT_BLOCKED_CATEGORIES)
-        ),
-        custom_blocklist=list(graw.get("custom_blocklist") or []),
+    graw = _mapping(raw.get("guardrails"), "guardrails")
+    categories = _string_list(
+        graw.get("blocked_categories", DEFAULT_BLOCKED_CATEGORIES),
+        "guardrails.blocked_categories",
     )
+    unknown = sorted(set(categories) - set(DEFAULT_BLOCKED_CATEGORIES))
+    if unknown:
+        raise ConfigError(
+            f"guardrails.blocked_categories: unknown {unknown}; "
+            f"expected any of {DEFAULT_BLOCKED_CATEGORIES}"
+        )
+    blocklist = _string_list(graw.get("custom_blocklist") or [], "guardrails.custom_blocklist")
+    if any(not term.strip() for term in blocklist):
+        raise ConfigError("guardrails.custom_blocklist must not contain empty terms")
+    guardrails = Guardrails(blocked_categories=categories, custom_blocklist=blocklist)
+
+    write_team = _optional_bool(perms.get("write_team"), "permissions.write_team")
+    write_org = _optional_bool(perms.get("write_org"), "permissions.write_org")
 
     memory_root = Path(raw.get("memory_root", "memories"))
     if not memory_root.is_absolute():
         memory_root = path.parent / memory_root
 
     return OrgConfig(
-        org=raw["org"],
+        org=str(raw["org"]),
         memory_root=memory_root,
         teams=teams,
-        default_write_team=bool(perms.get("write_team", True)),
-        default_write_org=bool(perms.get("write_org", False)),
+        default_write_team=True if write_team is None else write_team,
+        default_write_org=False if write_org is None else write_org,
         guardrails=guardrails,
         path=path,
     )

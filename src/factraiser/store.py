@@ -43,6 +43,9 @@ class Memory:
     team: str | None = None
     tags: list[str] = field(default_factory=list)
     created: str = ""
+    # Set on memories created by promote_memory: the source memory and its author.
+    promoted_from: str | None = None
+    original_author: str | None = None
 
     def to_markdown(self) -> str:
         meta = {
@@ -55,6 +58,9 @@ class Memory:
         }
         if self.team:
             meta["team"] = self.team
+        if self.promoted_from:
+            meta["promoted_from"] = self.promoted_from
+            meta["original_author"] = self.original_author
         front = yaml.safe_dump(meta, sort_keys=False).strip()
         return f"---\n{front}\n---\n\n{self.content.strip()}\n"
 
@@ -63,16 +69,29 @@ class Memory:
         match = re.match(r"\A---\n(.*?)\n---\n(.*)\Z", text, re.DOTALL)
         if not match:
             raise StoreError("not a memory file (missing frontmatter)")
-        meta = yaml.safe_load(match.group(1)) or {}
+        try:
+            meta = yaml.safe_load(match.group(1)) or {}
+        except yaml.YAMLError as exc:
+            raise StoreError(f"invalid frontmatter YAML ({exc})") from exc
+        if not isinstance(meta, dict):
+            raise StoreError("frontmatter is not a mapping")
+        tags = meta.get("tags") or []
+        if not isinstance(tags, list):
+            raise StoreError("frontmatter 'tags' is not a list")
+        team = meta.get("team")
+        promoted_from = meta.get("promoted_from")
+        original_author = meta.get("original_author")
         return cls(
             id=str(meta.get("id", "")),
             title=str(meta.get("title", "")),
             content=match.group(2).strip(),
             author=str(meta.get("author", "")),
             scope=str(meta.get("scope", "personal")),
-            team=meta.get("team"),
-            tags=list(meta.get("tags") or []),
+            team=None if team is None else str(team),
+            tags=[str(t) for t in tags],
             created=str(meta.get("created", "")),
+            promoted_from=None if promoted_from is None else str(promoted_from),
+            original_author=None if original_author is None else str(original_author),
         )
 
 
@@ -114,6 +133,7 @@ class MemoryStore:
         scope: str,
         team: str | None = None,
         tags: list[str] | None = None,
+        promoted_from: Memory | None = None,
     ) -> Memory:
         created = datetime.now(timezone.utc).isoformat(timespec="seconds")
         digest = secrets.token_hex(3)  # random: identical saves must not collide
@@ -126,6 +146,8 @@ class MemoryStore:
             team=team if scope == "team" else None,
             tags=tags or [],
             created=created,
+            promoted_from=promoted_from.id if promoted_from else None,
+            original_author=promoted_from.author if promoted_from else None,
         )
         directory = self.scope_dir(scope, team=team, user=author)
         directory.mkdir(parents=True, exist_ok=True)
@@ -149,21 +171,33 @@ class MemoryStore:
 
     # -- read -------------------------------------------------------------
 
-    def _iter_dir(self, directory: Path):
+    def iter_scope(self, scope: str, *, team: str | None = None, user: str | None = None):
+        """Memories stored in one scope directory.
+
+        The directory, not the frontmatter, decides scope and team (and the
+        author, for personal memory): frontmatter is hand-editable, and a file
+        in org/ claiming to be someone's personal note must still read as org.
+        """
+        directory = self.scope_dir(scope, team=team, user=user)
         if not directory.is_dir():
             return
         for path in sorted(directory.glob("*.md")):
             try:
-                yield Memory.from_markdown(path.read_text())
-            except StoreError:
-                continue  # skip stray non-memory markdown
+                memory = Memory.from_markdown(path.read_text())
+            except (StoreError, OSError, UnicodeDecodeError):
+                continue  # one bad file must not take down recall for everyone
+            memory.scope = scope
+            memory.team = team if scope == "team" else None
+            if scope == "personal":
+                memory.author = user
+            yield memory
 
     def iter_accessible(self, user: str, user_teams: list[str]):
         """All memories `user` may read: own personal + their teams + org."""
-        yield from self._iter_dir(self.scope_dir("personal", user=user))
+        yield from self.iter_scope("personal", user=user)
         for team in user_teams:
-            yield from self._iter_dir(self.scope_dir("team", team=team))
-        yield from self._iter_dir(self.scope_dir("org"))
+            yield from self.iter_scope("team", team=team)
+        yield from self.iter_scope("org")
 
     def get(self, memory_id: str, user: str, user_teams: list[str]) -> Memory | None:
         for memory in self.iter_accessible(user, user_teams):

@@ -36,7 +36,7 @@ Connected through MCP, Claude can:
 
 - **`recall`** / **`shared_context`** — pull relevant team and org learnings before starting a task, so the LLM steers people in the direction the org has already chosen.
 - **`remember`** — commit a durable learning to the narrowest tier that fits, subject to permissions and guardrails.
-- **`promote_memory`** — move a learning up the hierarchy (personal → team → org), re-checked at each step.
+- **`promote_memory`** — move a learning up the hierarchy (personal → team → org), re-checked at each step. The copy records `promoted_from` and `original_author`.
 
 **The outcome loop:** every `recall` is traced, and when a task concludes the LLM calls **`record_outcome`** (`success` / `partial` / `failure` / `misleading`) so the org learns which memories actually help. Memories stay immutable — signal lives in an append-only, per-user trace log under `memories/traces/`, and usefulness is derived at query time. That signal now drives retrieval and curation: `recall` ranks proven memories above unproven ones (misleading ones sink, with a 180-day half-life so stale wins don't coast), and `factraiser review` reports memories to fix or archive, stale shared memories, and team memories that helped 2+ users — candidates for promotion to org tier. See `docs/design/outcome-loop.md` for the full design (private evals and org-owned trace export follow in phase 3).
 
@@ -117,7 +117,9 @@ Be clear-eyed about what enforces what:
 - **Guardrails are a safety net, not a boundary.** They're pattern-based and imperfect by design; give the AI context and treat blocked writes as a prompt to redact, with human review (e.g. promotion via PR) as the final gate.
 - **Shared memory is untrusted LLM input.** Anything committed to team/org tiers gets injected into other users' Claude sessions — treat writes to shared tiers like commits to shared code, because that's what they are.
 - **All names are path-validated.** Users, teams, and memory ids must be single safe path components; hostile values can't escape the memory root. LLM-supplied inputs are size-capped, and corrupted trace lines are skipped rather than crashing recall.
-- **Traces are personal-tier.** Raw trace files live under `memories/traces/users/<user>/`; only count-level aggregates surface to others.
+- **Traces are personal-tier.** Raw trace files live under `memories/traces/users/<user>/`. What surfaces to others is per-memory counts plus the short notes attached to `misleading` outcomes (shown in `factraiser review` to anyone who can read that memory) — so notes are guardrail-scanned like shared memory.
+- **Outcome signal resists gaming.** Only the latest outcome per trace counts, and each user's total pull on a memory's ranking is capped, so no single user can bury (or boost) a memory alone.
+- **Config is validated strictly.** Permission flags must be real YAML booleans (`true`/`false`, unquoted — a quoted `'false'` is rejected rather than read as true), and team/user names get the same path validation as the CLI applies.
 
 ## Development
 

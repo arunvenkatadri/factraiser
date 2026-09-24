@@ -38,6 +38,9 @@ MAX_NOTE_LEN = 4_000
 _OUTCOME_WEIGHTS = {"success": 1.0, "partial": 0.5, "failure": -0.5, "misleading": -2.0}
 # Outcome contributions halve every 180 days, so stale wins don't coast.
 _HALF_LIFE_DAYS = 180.0
+# Bounds on one user's total contribution to a memory's score, so no single
+# user can sink (or boost) a memory alone — it takes agreement across users.
+_USER_NET_MIN, _USER_NET_MAX = -2.0, 1.0
 
 
 @dataclass
@@ -57,7 +60,10 @@ class MemoryStats:
         """
         if self.decayed_net == 0.0:
             return 1.0
-        return max(0.4, 1.0 + 0.3 * math.tanh(self.decayed_net / 3.0))
+        # Asymmetric: a wrong memory is worse than no memory, so the
+        # downside (to 0.4) is steeper than the upside (to 1.3).
+        swing = 0.6 if self.decayed_net < 0 else 0.3
+        return max(0.4, 1.0 + swing * math.tanh(self.decayed_net / 3.0))
 
 
 class TraceLog:
@@ -125,7 +131,12 @@ class TraceLog:
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue  # one corrupted line must not take down recall/stats
-                if isinstance(event, dict) and "event" in event and "ts" in event:
+                if (
+                    isinstance(event, dict)
+                    and isinstance(event.get("event"), str)
+                    and isinstance(event.get("ts"), str)
+                    and isinstance(event.get("trace_id"), str)
+                ):
                     yield event
 
     def find_recall(self, user: str, trace_id: str) -> dict | None:
@@ -141,33 +152,52 @@ class TraceLog:
         (drives promotion candidates), and notes attached to `misleading`
         outcomes (drives the compost report). No task content beyond those
         notes — safe to show to anyone who can read the memory itself.
+
+        Anti-gaming: only the latest outcome per trace counts (re-recording
+        replaces the verdict, it doesn't add one), and each user's total
+        contribution to a memory's score is clamped to
+        [_USER_NET_MIN, _USER_NET_MAX].
         """
         now = now or datetime.now(timezone.utc)
         stats: dict[str, MemoryStats] = {}
+
+        def entry_for(memory_id: str, ts: str) -> MemoryStats:
+            entry = stats.setdefault(memory_id, MemoryStats())
+            if ts > entry.last_used:
+                entry.last_used = ts
+            return entry
+
         for user in users:
+            latest_outcome: dict[str, dict] = {}
             for event in self.iter_events(user):
                 memory_ids = event.get("memory_ids")
                 if not isinstance(memory_ids, list):
                     continue
-                for memory_id in memory_ids:
-                    entry = stats.setdefault(memory_id, MemoryStats())
-                    if event["event"] == "recall":
-                        entry.recalls += 1
-                    elif event["event"] == "outcome" and event.get("result") in entry.outcomes:
-                        result = event["result"]
-                        entry.outcomes[result] += 1
-                        try:
-                            age_seconds = (now - datetime.fromisoformat(event["ts"])).total_seconds()
-                            age_days = max(0.0, age_seconds / 86400)
-                        except (ValueError, TypeError):
-                            age_days = 0.0  # unparseable timestamp: count it, skip decay
-                        decay = 0.5 ** (age_days / _HALF_LIFE_DAYS)
-                        entry.decayed_net += _OUTCOME_WEIGHTS[result] * decay
-                        if result == "success":
-                            entry.success_users.add(event.get("user", user))
-                        elif result == "misleading" and event.get("note"):
-                            if len(entry.misleading_notes) < 3:
-                                entry.misleading_notes.append(str(event["note"])[:200])
-                    if event["ts"] > entry.last_used:
-                        entry.last_used = event["ts"]
+                if event["event"] == "recall":
+                    for memory_id in memory_ids:
+                        entry_for(str(memory_id), event["ts"]).recalls += 1
+                elif event["event"] == "outcome" and event.get("result") in VALID_RESULTS:
+                    latest_outcome[event["trace_id"]] = event  # later lines win
+
+            user_net: dict[str, float] = {}
+            for event in latest_outcome.values():
+                result = event["result"]
+                try:
+                    age_seconds = (now - datetime.fromisoformat(event["ts"])).total_seconds()
+                    age_days = max(0.0, age_seconds / 86400)
+                except (ValueError, TypeError):
+                    age_days = 0.0  # unparseable timestamp: count it, skip decay
+                decay = 0.5 ** (age_days / _HALF_LIFE_DAYS)
+                for memory_id in map(str, event["memory_ids"]):
+                    entry = entry_for(memory_id, event["ts"])
+                    entry.outcomes[result] += 1
+                    user_net[memory_id] = user_net.get(memory_id, 0.0) + _OUTCOME_WEIGHTS[result] * decay
+                    if result == "success":
+                        # the trace directory is the identity, not the forgeable event field
+                        entry.success_users.add(user)
+                    elif result == "misleading" and event.get("note"):
+                        if len(entry.misleading_notes) < 3:
+                            entry.misleading_notes.append(str(event["note"])[:200])
+            for memory_id, net in user_net.items():
+                stats[memory_id].decayed_net += min(_USER_NET_MAX, max(_USER_NET_MIN, net))
         return stats

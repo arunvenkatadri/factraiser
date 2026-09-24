@@ -85,10 +85,10 @@ def cmd_status(args) -> int:
     store = MemoryStore(config.memory_root)
     print(f"org: {config.org}")
     print(f"memory root: {config.memory_root}")
-    org_count = sum(1 for _ in store._iter_dir(store.scope_dir("org")))
+    org_count = sum(1 for _ in store.iter_scope("org"))
     print(f"org memories: {org_count}")
     for team in config.teams.values():
-        count = sum(1 for _ in store._iter_dir(store.scope_dir("team", team=team.name)))
+        count = sum(1 for _ in store.iter_scope("team", team=team.name))
         print(f"team {team.name}: {len(team.members)} members, {count} memories")
     return 0
 
@@ -237,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except ConfigError as exc:
+    except (ConfigError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 

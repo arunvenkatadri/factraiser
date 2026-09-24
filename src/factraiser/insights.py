@@ -33,8 +33,8 @@ def generate_insights(config: OrgConfig, store: MemoryStore) -> str:
 
     shared = []
     for team in config.teams:
-        shared.extend(store._iter_dir(store.scope_dir("team", team=team)))
-    shared.extend(store._iter_dir(store.scope_dir("org")))
+        shared.extend(store.iter_scope("team", team=team))
+    shared.extend(store.iter_scope("org"))
 
     if not shared:
         return "No team or org memory to analyze yet."
@@ -54,4 +54,7 @@ def generate_insights(config: OrgConfig, store: MemoryStore) -> str:
         ],
     ) as stream:
         message = stream.get_final_message()
-    return next(b.text for b in message.content if b.type == "text")
+    text = "".join(b.text for b in message.content if b.type == "text")
+    if not text:
+        raise RuntimeError(f"insights: model returned no text (stop_reason={message.stop_reason})")
+    return text
